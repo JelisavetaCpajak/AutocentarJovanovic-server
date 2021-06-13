@@ -11,7 +11,7 @@ routes.get("/:jmbgIliPib", async (req, res) => {
       await new Promise((resolve, reject) => {
         pool.query(
           "select r.sifra_racuna,r.datum,r.ukupno_sa_pdv,r.ukupno_bez_pdv,k.id_klijenta,k.ime_prezime_klijenta,k.ime_firme,zotp.id_broj,sd.reg_oznaka,v.broj_sasije from racun r join zapisnik_o_tehnickom_pregledu zotp on(r.id_zapisnika=zotp.id_broj) join saobracajna_dozvola sd on(zotp.reg_oznaka=sd.reg_oznaka) join vozilo v on(sd.broj_sasije=v.broj_sasije) join klijent k on(v.id_klijenta=k.id_klijenta) where k.jmbg=? or k.pib=?",
-          [req.params.jmbgIliPib,req.params.jmbgIliPib],
+          [req.params.jmbgIliPib, req.params.jmbgIliPib],
           (err, results) => {
             console.log(err);
             console.log(results);
@@ -36,12 +36,13 @@ routes.get("/stavke/:sifra_racuna", async (req, res) => {
     res.json(
       await new Promise((resolve, reject) => {
         pool.query(
-          "select * from stavka_racuna s join racun r on (s.sifra_racuna=r.sifra_racuna) where r.sifra_racuna=?",
+          "select s.sifra_racuna,s.redni_broj,s.naziv,s.kolicina,s.cena_sa_pdv,s.cena_bez_pdv from stavka_racuna s join racun r on (s.sifra_racuna=r.sifra_racuna) where r.sifra_racuna=?",
           [req.params.sifra_racuna],
           (err, results) => {
             if (err) {
               return reject(err);
             } else {
+              console.log("ress: ", results);
               return resolve(results);
             }
           }
@@ -74,8 +75,6 @@ routes.delete("/obrisi", async (req, res) => {
 
       //izbrisane sve stavke za dati racun
 
-      
-
       await connection.query("delete from racun where sifra_racuna=?", [
         req.body.racun.sifra_racuna,
       ]);
@@ -96,8 +95,9 @@ routes.delete("/obrisi", async (req, res) => {
 // kreiraj racun
 routes.post("/", async (req, res) => {
   try {
-    for (let index = 0; index < req.body.racun.nizStavki.length; index++) {
-      req.body.racun.nizStavki[index].redni_broj = index + 1;
+    console.log("/kreiraj racun-server/request: data", req.body.data);
+    for (let index = 0; index < req.body.data.racun.nizStavki.length; index++) {
+      req.body.data.racun.nizStavki[index].redni_broj = index + 1;
     }
 
     const connection = await mysql.connection();
@@ -106,31 +106,35 @@ routes.post("/", async (req, res) => {
       await connection.query("START TRANSACTION");
       let sifraRacuna = uuid.v4();
 
-      //let datumString = req.body.racun.datum.toString().split("T")[0];
+      // let datumString = req.body.data.racun.datum.split("T")[0];
+      console.log("datumString: ", datumString);
 
       await connection.query(
         "insert into racun (sifra_racuna, datum, ukupno_sa_pdv, ukupno_bez_pdv, id_klijenta, id_zapisnika) values (?,?,?,?,?,?)",
         [
           sifraRacuna,
-          req.body.racun.datum,
-          req.body.racun.ukupno_sa_pdv,
-          req.body.racun.ukupno_bez_pdv,
-          req.body.racun.klijent.id_klijenta,
-          req.body.racun.zapisnik.id_broj
-          
+          req.body.data.racun.datum,
+          req.body.data.racun.ukupno_sa_pdv,
+          req.body.data.racun.ukupno_bez_pdv,
+          req.body.data.racun.klijent.id_klijenta,
+          req.body.data.racun.zapisnik.id_broj,
         ]
       );
 
-      for (let index = 0; index < req.body.racun.nizStavki.length; index++) {
+      for (
+        let index = 0;
+        index < req.body.data.racun.nizStavki.length;
+        index++
+      ) {
         await connection.query(
           "insert into stavka_racuna(sifra_racuna, redni_broj, naziv, kolicina, cena_sa_pdv, cena_bez_pdv) values (?,?,?,?,?,?)",
           [
             sifraRacuna,
-            req.body.racun.nizStavki[index].redni_broj,
-            req.body.racun.nizStavki[index].naziv,
-            req.body.racun.nizStavki[index].kolicina,
-            req.body.racun.nizStavki[index].cena_sa_pdv,
-            req.body.racun.nizStavki[index].cena_bez_pdv
+            req.body.data.racun.nizStavki[index].redni_broj,
+            req.body.data.racun.nizStavki[index].naziv,
+            req.body.data.racun.nizStavki[index].kolicina,
+            req.body.data.racun.nizStavki[index].cena_sa_pdv,
+            req.body.data.racun.nizStavki[index].cena_bez_pdv,
           ]
         );
       }
@@ -143,6 +147,7 @@ routes.post("/", async (req, res) => {
       await connection.release();
     }
   } catch (e) {
+    console.log("kreiraj racun-server/ error: ", e);
     res.sendStatus(500);
   }
 });
@@ -150,64 +155,63 @@ routes.post("/", async (req, res) => {
 // izmeni racun
 routes.put("/izmena", async (req, res) => {
   try {
+    console.log("/izmeni racun-server/request: data", req.body.data);
     const connection = await mysql.connection();
     try {
       console.log("at izmeniRacun...");
       await connection.query("START TRANSACTION");
 
-      for (let index = 0; index < req.body.racun.nizStavki.length; index++) {
-        if (req.body.racun.nizStavki[index].kreiranje) {
+      for (
+        let index = 0;
+        index < req.body.data.racun.nizStavki.length;
+        index++
+      ) {
+        if (req.body.data.racun.nizStavki[index].kreiranje) {
           let maxRB = await connection.query(
             "select max(redni_broj) from stavka_racuna where sifra_racuna=?",
-            [req.body.racun.sifra_racuna]
+            [req.body.data.racun.sifra_racuna]
           );
           let noviRB = maxRB[0]["max(redni_broj)"];
           await connection.query(
             "insert into stavka_racuna(sifra_racuna, redni_broj, naziv, kolicina, cena_sa_pdv, cena_bez_pdv) values (?,?,?,?,?,?)",
             [
-              req.body.racun.sifra_racuna,
+              req.body.data.racun.sifra_racuna,
               noviRB + 1,
-              req.body.racun.nizStavki[index].naziv,
-              req.body.racun.nizStavki[index].kolicina,
-              req.body.racun.nizStavki[index].cena_sa_pdv,
-              req.body.racun.nizStavki[index].cena_bez_pdv
+              req.body.data.racun.nizStavki[index].naziv,
+              req.body.data.racun.nizStavki[index].kolicina,
+              req.body.data.racun.nizStavki[index].cena_sa_pdv,
+              req.body.data.racun.nizStavki[index].cena_bez_pdv,
             ]
           );
-        } else if (req.body.racun.nizStavki[index].izmena) {
+        } else if (req.body.data.racun.nizStavki[index].izmena) {
           await connection.query(
             "update stavka_racuna set naziv=?, kolicina=?, cena_sa_pdv=?, cena_bez_pdv=? where sifra_racuna=? && redni_broj=?",
             [
-              req.body.racun.nizStavki[index].naziv,
-              req.body.racun.nizStavki[index].kolicina,
-              req.body.racun.nizStavki[index].cena_sa_pdv,
-              req.body.racun.nizStavki[index].cena_bez_pdv,
-              req.body.racun.sifra_racuna,
-              req.body.racun.nizStavki[index].redni_broj
-
+              req.body.data.racun.nizStavki[index].naziv,
+              req.body.data.racun.nizStavki[index].kolicina,
+              req.body.data.racun.nizStavki[index].cena_sa_pdv,
+              req.body.data.racun.nizStavki[index].cena_bez_pdv,
+              req.body.data.racun.sifra_racuna,
+              req.body.data.racun.nizStavki[index].redni_broj,
             ]
           );
-          
-
-        } else if (req.body.racun.nizStavki[index].brisanje) {
+        } else if (req.body.data.racun.nizStavki[index].brisanje) {
           await connection.query(
             "delete from stavka_racuna where sifra_racuna=? && redni_broj=?",
             [
-              req.body.racun.sifra_racuna,
-              req.body.racun.nizStavki[index].redni_broj
+              req.body.data.racun.sifra_racuna,
+              req.body.data.racun.nizStavki[index].redni_broj,
             ]
           );
-
-          
         }
       }
       //ovo sam dodala jer ne azurira ukupne vrednosti u racunu kad se izmeni racun
       await connection.query(
         "update racun set ukupno_sa_pdv=?, ukupno_bez_pdv=? where sifra_racuna=? ",
         [
-          req.body.racun.ukupno_sa_pdv,
-          req.body.racun.ukupno_bez_pdv,
-          req.body.racun.sifra_racuna
-
+          req.body.data.racun.ukupno_sa_pdv,
+          req.body.data.racun.ukupno_bez_pdv,
+          req.body.data.racun.sifra_racuna,
         ]
       );
       res.json(await connection.query("COMMIT"));
@@ -219,6 +223,7 @@ routes.put("/izmena", async (req, res) => {
       await connection.release();
     }
   } catch (e) {
+    console.log("izmeni racun-server-error: ", e);
     res.sendStatus(500);
   }
 });
